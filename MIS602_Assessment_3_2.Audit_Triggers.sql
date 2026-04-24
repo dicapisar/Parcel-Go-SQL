@@ -81,34 +81,28 @@ END;
 --            depot_id    → depots
 --            resolved_by → staff (optional, only checked if not NULL)
 
-CREATE TRIGGER trg_scan_alert_logs_before_insert
-BEFORE INSERT ON scan_alert_logs
+CREATE TRIGGER trg_notifications_log
+AFTER INSERT ON notifications
 FOR EACH ROW
 BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM parcels
-    WHERE parcel_id = NEW.parcel_id
-  ) THEN
-    SIGNAL SQLSTATE '45000'
-      SET MESSAGE_TEXT = 'scan_alert_logs: parcel_id does not exist in parcels';
-  END IF;
-
-  IF NOT EXISTS (
-    SELECT 1 FROM depots
-    WHERE depot_id = NEW.depot_id
-  ) THEN
-    SIGNAL SQLSTATE '45000'
-      SET MESSAGE_TEXT = 'scan_alert_logs: depot_id does not exist in depots';
-  END IF;
-
-  -- resolved_by is optional (nullable), only validate if a value is provided
-  IF NEW.resolved_by IS NOT NULL AND NOT EXISTS (
-    SELECT 1 FROM staff
-    WHERE staff_id = NEW.resolved_by
-  ) THEN
-    SIGNAL SQLSTATE '45000'
-      SET MESSAGE_TEXT = 'scan_alert_logs: resolved_by does not exist in staff';
-  END IF;
+    INSERT INTO notification_logs (
+        notification_id,
+        attempted_at,
+        channel_type_id,
+        status,
+        failure_reason
+    )
+    VALUES (
+        NEW.notification_id,
+        NOW(),
+        NEW.channel_type_id,
+        CASE NEW.delivery_status
+            WHEN 'sent'    THEN 'sent'
+            WHEN 'failed'  THEN 'failed'
+            ELSE 'failed'
+        END,
+        NULL
+    );
 END;
 //
 
@@ -116,65 +110,31 @@ DELIMITER ;
 
 DELIMITER //
 
-CREATE TRIGGER trg_notifications_validate_contact
-BEFORE INSERT ON notifications
-FOR EACH ROW
-BEGIN
-    DECLARE valid_contact INT DEFAULT 0;
 
-    SELECT COUNT(*) INTO valid_contact
-    FROM contact_details
-    WHERE customer_id         = NEW.customer_id
-      AND channel_type_id     = NEW.channel_type_id
-      AND use_for_notification = TRUE
-      AND contact_value       IS NOT NULL
-      AND contact_value       <> '';
-
-    IF valid_contact = 0 THEN
-        INSERT INTO notification_logs (
-            notification_id,
-            attempted_at,
-            channel_type_id,
-            status,
-            failure_reason
-        )
-        VALUES (
-            NULL,
-            NOW(),
-            NEW.channel_type_id,
-            'failed',
-            'No valid contact details found for customer'
-        );
-
-        SIGNAL SQLSTATE '45000'
-            SET MESSAGE_TEXT = 'Notification blocked: no valid contact details.';
-    END IF;
-END;
-//
-
-CREATE TRIGGER trg_payments_log_on_fail
+CREATE TRIGGER trg_payments_log
 BEFORE INSERT ON payments
 FOR EACH ROW
 BEGIN
-    IF NEW.status IN ('failed', 'declined') THEN
-        INSERT INTO pay_attempt_logs (
-            invoice_id,
-            attempted_at,
-            method_id,
-            amount,
-            status,
-            failure_reason
-        )
-        VALUES (
-            NEW.invoice_id,
-            NEW.transaction_at,
-            NEW.payment_method_id,
-            NEW.amount,
-            NEW.status,
-            NEW.failure_reason
-        );
-        
-    END IF;
+    INSERT INTO pay_attempt_logs (
+        invoice_id,
+        attempted_at,
+        method_id,
+        amount,
+        status,
+        failure_reason
+    )
+    VALUES (
+        NEW.invoice_id,
+        NOW(),
+        NEW.payment_method_id,
+        NEW.amount,
+        CASE NEW.status
+            WHEN 'completed' THEN 'success'
+            WHEN 'failed'    THEN 'failed'
+            ELSE 'declined'
+        END,
+        NEW.failure_reason
+    );
 END;
 //
 
