@@ -626,33 +626,49 @@ ALTER TABLE `invoice_lines` ADD FOREIGN KEY (`rate_id`) REFERENCES `rates` (`rat
 ALTER TABLE `invoice_lines` ADD FOREIGN KEY (`parcel_id`) REFERENCES `parcels` (`parcel_id`);
 
 
--- ─────────────────────────────────────────────────────
+-- ═════════════════════════════════════════════════════════════════
 -- PARCELGO – Audit & Log Trigger Logic
--- ─────────────────────────────────────────────────────
--- This file implements two layers of logic:
+-- ═════════════════════════════════════════════════════════════════
+-- This file implements three layers of trigger logic:
 --
--- LAYER 1 – SOFT REFERENCE VALIDATION (notification_logs,
---            pay_attempt_logs, scan_alert_logs)
---   These log tables intentionally avoid hard FKs so that
---   logs are preserved even if parent records are deleted.
---   BEFORE INSERT triggers enforce referential integrity
---   at insert time without creating FK constraints.
+-- LAYER 1 – SOFT REFERENCE VALIDATION
+--   Applies to: notification_logs, pay_attempt_logs
+--   These log tables intentionally have no hard FK constraints,
+--   so that historical log records are preserved even if parent
+--   records are later deleted. BEFORE INSERT triggers enforce
+--   referential integrity at insert time without FK constraints.
 --
--- LAYER 2 – AUDIT TRAIL (audit_records)
---   AFTER INSERT / UPDATE / DELETE triggers on core tables
---   automatically write a record to audit_records whenever
---   data changes, capturing who changed what and when.
--- ─────────────────────────────────────────────────────
-
--- ══════════════════════════════════════════════════════
--- LAYER 1 — SOFT REFERENCE VALIDATION TRIGGERS
--- ══════════════════════════════════════════════════════
-
--- ── notification_logs ─────────────────────────────────
--- Soft refs: notification_id → notifications
---            channel_type_id → channel_types
+-- LAYER 2 – AUTO-LOG (CAMERA) TRIGGERS
+--   Applies to: notifications → notification_logs
+--               payments     → pay_attempt_logs
+--   These triggers fire after a row is inserted into a core table
+--   and automatically write a corresponding entry into the matching
+--   log table. No manual insert into the log table is needed.
+--
+-- LAYER 3 – AUDIT TRAIL
+--   Applies to: customers, orders, parcels, invoices, payments,
+--               staff, drivers, vehicles
+--   AFTER INSERT / UPDATE / DELETE triggers write one row to
+--   audit_records on every data change, capturing the action,
+--   table name, affected record ID, and timestamp.
+--
+--   Note: user_id defaults to 0 and user_type to 'system' because
+--   MySQL triggers do not have native session-user context. In a
+--   production app, set session variables before each operation:
+--     SET @current_user_id   = 42;
+--     SET @current_user_type = 'staff';
+--   and reference them inside the trigger body.
+-- ═════════════════════════════════════════════════════════════════
 
 DELIMITER //
+
+-- ═════════════════════════════════════════════════════════════════
+-- LAYER 1 — SOFT REFERENCE VALIDATION TRIGGERS
+-- ═════════════════════════════════════════════════════════════════
+
+-- ── notification_logs ─────────────────────────────────────────────
+-- Validates that notification_id exists in notifications
+-- and channel_type_id exists in channel_types before any insert.
 
 CREATE TRIGGER trg_notification_logs_before_insert
 BEFORE INSERT ON notification_logs
@@ -676,9 +692,9 @@ BEGIN
 END;
 //
 
--- ── pay_attempt_logs ──────────────────────────────────
--- Soft refs: invoice_id  → invoices
---            method_id   → payment_methods
+-- ── pay_attempt_logs ──────────────────────────────────────────────
+-- Validates that invoice_id exists in invoices
+-- and method_id exists in payment_methods before any insert.
 
 CREATE TRIGGER trg_pay_attempt_logs_before_insert
 BEFORE INSERT ON pay_attempt_logs
@@ -702,87 +718,79 @@ BEGIN
 END;
 //
 
--- ── scan_alert_logs ───────────────────────────────────
--- Soft refs: parcel_id   → parcels
---            depot_id    → depots
---            resolved_by → staff (optional, only checked if not NULL)
+-- ═════════════════════════════════════════════════════════════════
+-- LAYER 2 — AUTO-LOG (CAMERA) TRIGGERS
+-- ═════════════════════════════════════════════════════════════════
+
+-- ── notifications → notification_logs ────────────────────────────
+-- Fires after every insert into notifications.
+-- Automatically creates a matching row in notification_logs,
+-- recording the channel, delivery status, and attempt timestamp.
+-- The Layer 1 validation trigger will also fire on this insert.
 
 CREATE TRIGGER trg_notifications_log
 AFTER INSERT ON notifications
 FOR EACH ROW
 BEGIN
-    INSERT INTO notification_logs (
-        notification_id,
-        attempted_at,
-        channel_type_id,
-        status,
-        failure_reason
-    )
-    VALUES (
-        NEW.notification_id,
-        NOW(),
-        NEW.channel_type_id,
-        CASE NEW.delivery_status
-            WHEN 'sent'    THEN 'sent'
-            WHEN 'failed'  THEN 'failed'
-            ELSE 'failed'
-        END,
-        NULL
-    );
+  INSERT INTO notification_logs (
+    notification_id,
+    attempted_at,
+    channel_type_id,
+    status,
+    failure_reason
+  )
+  VALUES (
+    NEW.notification_id,
+    NOW(),
+    NEW.channel_type_id,
+    CASE NEW.delivery_status
+      WHEN 'sent'   THEN 'sent'
+      WHEN 'failed' THEN 'failed'
+      ELSE 'failed'
+    END,
+    NULL
+  );
 END;
 //
 
-DELIMITER ;
-
-DELIMITER //
-
+-- ── payments → pay_attempt_logs ───────────────────────────────────
+-- Fires before every insert into payments.
+-- Automatically creates a matching row in pay_attempt_logs,
+-- recording the invoice, method, amount, and outcome status.
+-- The Layer 1 validation trigger will also fire on this insert.
 
 CREATE TRIGGER trg_payments_log
 BEFORE INSERT ON payments
 FOR EACH ROW
 BEGIN
-    INSERT INTO pay_attempt_logs (
-        invoice_id,
-        attempted_at,
-        method_id,
-        amount,
-        status,
-        failure_reason
-    )
-    VALUES (
-        NEW.invoice_id,
-        NOW(),
-        NEW.payment_method_id,
-        NEW.amount,
-        CASE NEW.status
-            WHEN 'completed' THEN 'success'
-            WHEN 'failed'    THEN 'failed'
-            ELSE 'declined'
-        END,
-        NEW.failure_reason
-    );
+  INSERT INTO pay_attempt_logs (
+    invoice_id,
+    attempted_at,
+    method_id,
+    amount,
+    status,
+    failure_reason
+  )
+  VALUES (
+    NEW.invoice_id,
+    NOW(),
+    NEW.payment_method_id,
+    NEW.amount,
+    CASE NEW.status
+      WHEN 'completed' THEN 'success'
+      WHEN 'failed'    THEN 'failed'
+      ELSE 'declined'
+    END,
+    NEW.failure_reason
+  );
 END;
 //
 
-DELIMITER ;
+-- ═════════════════════════════════════════════════════════════════
+-- LAYER 3 — AUDIT TRAIL TRIGGERS
+-- ═════════════════════════════════════════════════════════════════
 
--- ══════════════════════════════════════════════════════
--- LAYER 2 — AUDIT TRAIL TRIGGERS
--- ══════════════════════════════════════════════════════
--- These triggers fire on INSERT, UPDATE, and DELETE on
--- the core business tables and write a row to audit_records.
---
--- user_type is set to 'system' as a safe default since
--- MySQL triggers do not have native session-user context.
--- In a real app, you would SET a session variable before
--- each operation, e.g.: SET @current_user_id = 42;
---                        SET @current_user_type = 'staff';
--- and reference NEW.* or @current_user_id here.
--- ──────────────────────────────────────────────────────
-
-DELIMITER //
-
--- ── customers ─────────────────────────────────────────
+-- ── customers ─────────────────────────────────────────────────────
 
 CREATE TRIGGER trg_audit_customers_insert
 AFTER INSERT ON customers
@@ -811,7 +819,7 @@ BEGIN
 END;
 //
 
--- ── orders ────────────────────────────────────────────
+-- ── orders ────────────────────────────────────────────────────────
 
 CREATE TRIGGER trg_audit_orders_insert
 AFTER INSERT ON orders
@@ -840,7 +848,7 @@ BEGIN
 END;
 //
 
--- ── parcels ───────────────────────────────────────────
+-- ── parcels ───────────────────────────────────────────────────────
 
 CREATE TRIGGER trg_audit_parcels_insert
 AFTER INSERT ON parcels
@@ -869,7 +877,7 @@ BEGIN
 END;
 //
 
--- ── invoices ──────────────────────────────────────────
+-- ── invoices ──────────────────────────────────────────────────────
 
 CREATE TRIGGER trg_audit_invoices_insert
 AFTER INSERT ON invoices
@@ -898,7 +906,7 @@ BEGIN
 END;
 //
 
--- ── payments ──────────────────────────────────────────
+-- ── payments ──────────────────────────────────────────────────────
 
 CREATE TRIGGER trg_audit_payments_insert
 AFTER INSERT ON payments
@@ -927,7 +935,7 @@ BEGIN
 END;
 //
 
--- ── staff ─────────────────────────────────────────────
+-- ── staff ─────────────────────────────────────────────────────────
 
 CREATE TRIGGER trg_audit_staff_insert
 AFTER INSERT ON staff
@@ -956,7 +964,7 @@ BEGIN
 END;
 //
 
--- ── drivers ───────────────────────────────────────────
+-- ── drivers ───────────────────────────────────────────────────────
 
 CREATE TRIGGER trg_audit_drivers_insert
 AFTER INSERT ON drivers
@@ -985,7 +993,7 @@ BEGIN
 END;
 //
 
--- ── vehicles ──────────────────────────────────────────
+-- ── vehicles ──────────────────────────────────────────────────────
 
 CREATE TRIGGER trg_audit_vehicles_insert
 AFTER INSERT ON vehicles
