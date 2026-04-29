@@ -19,7 +19,9 @@ CREATE TABLE `audit_records` (
   `record_id`   INT NOT NULL,
   `changed_at`  DATETIME NOT NULL,
   `user_type`   ENUM('staff','customer','driver','system') NOT NULL,
-  `user_id`     INT NOT NULL
+  `user_id`     INT NOT NULL,
+  `before_data` JSON NULL,
+  `after_data`  JSON NULL
 );
 
 CREATE TABLE `notification_logs` (
