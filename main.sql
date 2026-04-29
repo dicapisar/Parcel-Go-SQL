@@ -19,7 +19,9 @@ CREATE TABLE `audit_records` (
   `record_id`   INT NOT NULL,
   `changed_at`  DATETIME NOT NULL,
   `user_type`   ENUM('staff','customer','driver','system') NOT NULL,
-  `user_id`     INT NOT NULL
+  `user_id`     INT NOT NULL,
+  `before_data` JSON NULL,
+  `after_data`  JSON NULL
 );
 
 CREATE TABLE `notification_logs` (
@@ -789,6 +791,10 @@ END;
 -- ═════════════════════════════════════════════════════════════════
 -- LAYER 3 — AUDIT TRAIL TRIGGERS
 -- ═════════════════════════════════════════════════════════════════
+-- INSERT → after_data captures the new row, before_data is NULL
+-- UPDATE → before_data captures old values, after_data captures new
+-- DELETE → before_data captures the deleted row, after_data is NULL
+-- ═════════════════════════════════════════════════════════════════
 
 -- ── customers ─────────────────────────────────────────────────────
 
@@ -796,8 +802,12 @@ CREATE TRIGGER trg_audit_customers_insert
 AFTER INSERT ON customers
 FOR EACH ROW
 BEGIN
-  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id)
-  VALUES ('INSERT', 'customers', NEW.customer_id, NOW(), 'system', 0);
+  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id, before_data, after_data)
+  VALUES ('INSERT', 'customers', NEW.customer_id, NOW(), 'system', 0,
+    NULL,
+    JSON_OBJECT('first_name', NEW.first_name, 'last_name', NEW.last_name,
+                'dob', NEW.dob, 'account_status', NEW.account_status)
+  );
 END;
 //
 
@@ -805,8 +815,13 @@ CREATE TRIGGER trg_audit_customers_update
 AFTER UPDATE ON customers
 FOR EACH ROW
 BEGIN
-  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id)
-  VALUES ('UPDATE', 'customers', NEW.customer_id, NOW(), 'system', 0);
+  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id, before_data, after_data)
+  VALUES ('UPDATE', 'customers', NEW.customer_id, NOW(), 'system', 0,
+    JSON_OBJECT('first_name', OLD.first_name, 'last_name', OLD.last_name,
+                'dob', OLD.dob, 'account_status', OLD.account_status),
+    JSON_OBJECT('first_name', NEW.first_name, 'last_name', NEW.last_name,
+                'dob', NEW.dob, 'account_status', NEW.account_status)
+  );
 END;
 //
 
@@ -814,8 +829,12 @@ CREATE TRIGGER trg_audit_customers_delete
 AFTER DELETE ON customers
 FOR EACH ROW
 BEGIN
-  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id)
-  VALUES ('DELETE', 'customers', OLD.customer_id, NOW(), 'system', 0);
+  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id, before_data, after_data)
+  VALUES ('DELETE', 'customers', OLD.customer_id, NOW(), 'system', 0,
+    JSON_OBJECT('first_name', OLD.first_name, 'last_name', OLD.last_name,
+                'dob', OLD.dob, 'account_status', OLD.account_status),
+    NULL
+  );
 END;
 //
 
@@ -825,8 +844,12 @@ CREATE TRIGGER trg_audit_orders_insert
 AFTER INSERT ON orders
 FOR EACH ROW
 BEGIN
-  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id)
-  VALUES ('INSERT', 'orders', NEW.order_id, NOW(), 'system', 0);
+  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id, before_data, after_data)
+  VALUES ('INSERT', 'orders', NEW.order_id, NOW(), 'system', 0,
+    NULL,
+    JSON_OBJECT('customer_id', NEW.customer_id, 'status', NEW.status,
+                'placed_at', NEW.placed_at, 'total_weight', NEW.total_weight)
+  );
 END;
 //
 
@@ -834,8 +857,13 @@ CREATE TRIGGER trg_audit_orders_update
 AFTER UPDATE ON orders
 FOR EACH ROW
 BEGIN
-  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id)
-  VALUES ('UPDATE', 'orders', NEW.order_id, NOW(), 'system', 0);
+  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id, before_data, after_data)
+  VALUES ('UPDATE', 'orders', NEW.order_id, NOW(), 'system', 0,
+    JSON_OBJECT('customer_id', OLD.customer_id, 'status', OLD.status,
+                'placed_at', OLD.placed_at, 'total_weight', OLD.total_weight),
+    JSON_OBJECT('customer_id', NEW.customer_id, 'status', NEW.status,
+                'placed_at', NEW.placed_at, 'total_weight', NEW.total_weight)
+  );
 END;
 //
 
@@ -843,8 +871,12 @@ CREATE TRIGGER trg_audit_orders_delete
 AFTER DELETE ON orders
 FOR EACH ROW
 BEGIN
-  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id)
-  VALUES ('DELETE', 'orders', OLD.order_id, NOW(), 'system', 0);
+  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id, before_data, after_data)
+  VALUES ('DELETE', 'orders', OLD.order_id, NOW(), 'system', 0,
+    JSON_OBJECT('customer_id', OLD.customer_id, 'status', OLD.status,
+                'placed_at', OLD.placed_at, 'total_weight', OLD.total_weight),
+    NULL
+  );
 END;
 //
 
@@ -854,8 +886,12 @@ CREATE TRIGGER trg_audit_parcels_insert
 AFTER INSERT ON parcels
 FOR EACH ROW
 BEGIN
-  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id)
-  VALUES ('INSERT', 'parcels', NEW.parcel_id, NOW(), 'system', 0);
+  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id, before_data, after_data)
+  VALUES ('INSERT', 'parcels', NEW.parcel_id, NOW(), 'system', 0,
+    NULL,
+    JSON_OBJECT('order_id', NEW.order_id, 'lifecycle_status_id', NEW.lifecycle_status_id,
+                'weight', NEW.weight, 'parcel_category_id', NEW.parcel_category_id)
+  );
 END;
 //
 
@@ -863,8 +899,13 @@ CREATE TRIGGER trg_audit_parcels_update
 AFTER UPDATE ON parcels
 FOR EACH ROW
 BEGIN
-  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id)
-  VALUES ('UPDATE', 'parcels', NEW.parcel_id, NOW(), 'system', 0);
+  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id, before_data, after_data)
+  VALUES ('UPDATE', 'parcels', NEW.parcel_id, NOW(), 'system', 0,
+    JSON_OBJECT('order_id', OLD.order_id, 'lifecycle_status_id', OLD.lifecycle_status_id,
+                'weight', OLD.weight, 'parcel_category_id', OLD.parcel_category_id),
+    JSON_OBJECT('order_id', NEW.order_id, 'lifecycle_status_id', NEW.lifecycle_status_id,
+                'weight', NEW.weight, 'parcel_category_id', NEW.parcel_category_id)
+  );
 END;
 //
 
@@ -872,8 +913,12 @@ CREATE TRIGGER trg_audit_parcels_delete
 AFTER DELETE ON parcels
 FOR EACH ROW
 BEGIN
-  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id)
-  VALUES ('DELETE', 'parcels', OLD.parcel_id, NOW(), 'system', 0);
+  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id, before_data, after_data)
+  VALUES ('DELETE', 'parcels', OLD.parcel_id, NOW(), 'system', 0,
+    JSON_OBJECT('order_id', OLD.order_id, 'lifecycle_status_id', OLD.lifecycle_status_id,
+                'weight', OLD.weight, 'parcel_category_id', OLD.parcel_category_id),
+    NULL
+  );
 END;
 //
 
@@ -883,8 +928,12 @@ CREATE TRIGGER trg_audit_invoices_insert
 AFTER INSERT ON invoices
 FOR EACH ROW
 BEGIN
-  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id)
-  VALUES ('INSERT', 'invoices', NEW.invoice_id, NOW(), 'system', 0);
+  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id, before_data, after_data)
+  VALUES ('INSERT', 'invoices', NEW.invoice_id, NOW(), 'system', 0,
+    NULL,
+    JSON_OBJECT('billing_detail_id', NEW.billing_detail_id, 'total_amount', NEW.total_amount,
+                'status', NEW.status, 'invoiced_at', NEW.invoiced_at)
+  );
 END;
 //
 
@@ -892,8 +941,13 @@ CREATE TRIGGER trg_audit_invoices_update
 AFTER UPDATE ON invoices
 FOR EACH ROW
 BEGIN
-  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id)
-  VALUES ('UPDATE', 'invoices', NEW.invoice_id, NOW(), 'system', 0);
+  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id, before_data, after_data)
+  VALUES ('UPDATE', 'invoices', NEW.invoice_id, NOW(), 'system', 0,
+    JSON_OBJECT('billing_detail_id', OLD.billing_detail_id, 'total_amount', OLD.total_amount,
+                'status', OLD.status, 'invoiced_at', OLD.invoiced_at),
+    JSON_OBJECT('billing_detail_id', NEW.billing_detail_id, 'total_amount', NEW.total_amount,
+                'status', NEW.status, 'invoiced_at', NEW.invoiced_at)
+  );
 END;
 //
 
@@ -901,8 +955,12 @@ CREATE TRIGGER trg_audit_invoices_delete
 AFTER DELETE ON invoices
 FOR EACH ROW
 BEGIN
-  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id)
-  VALUES ('DELETE', 'invoices', OLD.invoice_id, NOW(), 'system', 0);
+  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id, before_data, after_data)
+  VALUES ('DELETE', 'invoices', OLD.invoice_id, NOW(), 'system', 0,
+    JSON_OBJECT('billing_detail_id', OLD.billing_detail_id, 'total_amount', OLD.total_amount,
+                'status', OLD.status, 'invoiced_at', OLD.invoiced_at),
+    NULL
+  );
 END;
 //
 
@@ -912,8 +970,12 @@ CREATE TRIGGER trg_audit_payments_insert
 AFTER INSERT ON payments
 FOR EACH ROW
 BEGIN
-  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id)
-  VALUES ('INSERT', 'payments', NEW.payment_id, NOW(), 'system', 0);
+  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id, before_data, after_data)
+  VALUES ('INSERT', 'payments', NEW.payment_id, NOW(), 'system', 0,
+    NULL,
+    JSON_OBJECT('invoice_id', NEW.invoice_id, 'amount', NEW.amount,
+                'status', NEW.status, 'payment_method_id', NEW.payment_method_id)
+  );
 END;
 //
 
@@ -921,8 +983,13 @@ CREATE TRIGGER trg_audit_payments_update
 AFTER UPDATE ON payments
 FOR EACH ROW
 BEGIN
-  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id)
-  VALUES ('UPDATE', 'payments', NEW.payment_id, NOW(), 'system', 0);
+  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id, before_data, after_data)
+  VALUES ('UPDATE', 'payments', NEW.payment_id, NOW(), 'system', 0,
+    JSON_OBJECT('invoice_id', OLD.invoice_id, 'amount', OLD.amount,
+                'status', OLD.status, 'payment_method_id', OLD.payment_method_id),
+    JSON_OBJECT('invoice_id', NEW.invoice_id, 'amount', NEW.amount,
+                'status', NEW.status, 'payment_method_id', NEW.payment_method_id)
+  );
 END;
 //
 
@@ -930,8 +997,12 @@ CREATE TRIGGER trg_audit_payments_delete
 AFTER DELETE ON payments
 FOR EACH ROW
 BEGIN
-  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id)
-  VALUES ('DELETE', 'payments', OLD.payment_id, NOW(), 'system', 0);
+  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id, before_data, after_data)
+  VALUES ('DELETE', 'payments', OLD.payment_id, NOW(), 'system', 0,
+    JSON_OBJECT('invoice_id', OLD.invoice_id, 'amount', OLD.amount,
+                'status', OLD.status, 'payment_method_id', OLD.payment_method_id),
+    NULL
+  );
 END;
 //
 
@@ -941,8 +1012,12 @@ CREATE TRIGGER trg_audit_staff_insert
 AFTER INSERT ON staff
 FOR EACH ROW
 BEGIN
-  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id)
-  VALUES ('INSERT', 'staff', NEW.staff_id, NOW(), 'system', 0);
+  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id, before_data, after_data)
+  VALUES ('INSERT', 'staff', NEW.staff_id, NOW(), 'system', 0,
+    NULL,
+    JSON_OBJECT('first_name', NEW.first_name, 'last_name', NEW.last_name,
+                'email', NEW.email, 'role_id', NEW.role_id)
+  );
 END;
 //
 
@@ -950,8 +1025,13 @@ CREATE TRIGGER trg_audit_staff_update
 AFTER UPDATE ON staff
 FOR EACH ROW
 BEGIN
-  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id)
-  VALUES ('UPDATE', 'staff', NEW.staff_id, NOW(), 'system', 0);
+  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id, before_data, after_data)
+  VALUES ('UPDATE', 'staff', NEW.staff_id, NOW(), 'system', 0,
+    JSON_OBJECT('first_name', OLD.first_name, 'last_name', OLD.last_name,
+                'email', OLD.email, 'role_id', OLD.role_id),
+    JSON_OBJECT('first_name', NEW.first_name, 'last_name', NEW.last_name,
+                'email', NEW.email, 'role_id', NEW.role_id)
+  );
 END;
 //
 
@@ -959,8 +1039,12 @@ CREATE TRIGGER trg_audit_staff_delete
 AFTER DELETE ON staff
 FOR EACH ROW
 BEGIN
-  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id)
-  VALUES ('DELETE', 'staff', OLD.staff_id, NOW(), 'system', 0);
+  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id, before_data, after_data)
+  VALUES ('DELETE', 'staff', OLD.staff_id, NOW(), 'system', 0,
+    JSON_OBJECT('first_name', OLD.first_name, 'last_name', OLD.last_name,
+                'email', OLD.email, 'role_id', OLD.role_id),
+    NULL
+  );
 END;
 //
 
@@ -970,8 +1054,12 @@ CREATE TRIGGER trg_audit_drivers_insert
 AFTER INSERT ON drivers
 FOR EACH ROW
 BEGIN
-  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id)
-  VALUES ('INSERT', 'drivers', NEW.driver_id, NOW(), 'system', 0);
+  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id, before_data, after_data)
+  VALUES ('INSERT', 'drivers', NEW.driver_id, NOW(), 'system', 0,
+    NULL,
+    JSON_OBJECT('first_name', NEW.first_name, 'last_name', NEW.last_name,
+                'email', NEW.email, 'mobile_phone', NEW.mobile_phone)
+  );
 END;
 //
 
@@ -979,8 +1067,13 @@ CREATE TRIGGER trg_audit_drivers_update
 AFTER UPDATE ON drivers
 FOR EACH ROW
 BEGIN
-  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id)
-  VALUES ('UPDATE', 'drivers', NEW.driver_id, NOW(), 'system', 0);
+  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id, before_data, after_data)
+  VALUES ('UPDATE', 'drivers', NEW.driver_id, NOW(), 'system', 0,
+    JSON_OBJECT('first_name', OLD.first_name, 'last_name', OLD.last_name,
+                'email', OLD.email, 'mobile_phone', OLD.mobile_phone),
+    JSON_OBJECT('first_name', NEW.first_name, 'last_name', NEW.last_name,
+                'email', NEW.email, 'mobile_phone', NEW.mobile_phone)
+  );
 END;
 //
 
@@ -988,8 +1081,12 @@ CREATE TRIGGER trg_audit_drivers_delete
 AFTER DELETE ON drivers
 FOR EACH ROW
 BEGIN
-  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id)
-  VALUES ('DELETE', 'drivers', OLD.driver_id, NOW(), 'system', 0);
+  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id, before_data, after_data)
+  VALUES ('DELETE', 'drivers', OLD.driver_id, NOW(), 'system', 0,
+    JSON_OBJECT('first_name', OLD.first_name, 'last_name', OLD.last_name,
+                'email', OLD.email, 'mobile_phone', OLD.mobile_phone),
+    NULL
+  );
 END;
 //
 
@@ -999,8 +1096,12 @@ CREATE TRIGGER trg_audit_vehicles_insert
 AFTER INSERT ON vehicles
 FOR EACH ROW
 BEGIN
-  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id)
-  VALUES ('INSERT', 'vehicles', NEW.vehicle_id, NOW(), 'system', 0);
+  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id, before_data, after_data)
+  VALUES ('INSERT', 'vehicles', NEW.vehicle_id, NOW(), 'system', 0,
+    NULL,
+    JSON_OBJECT('registration', NEW.registration, 'vehicle_type_id', NEW.vehicle_type_id,
+                'capacity', NEW.capacity, 'is_available', NEW.is_available)
+  );
 END;
 //
 
@@ -1008,8 +1109,13 @@ CREATE TRIGGER trg_audit_vehicles_update
 AFTER UPDATE ON vehicles
 FOR EACH ROW
 BEGIN
-  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id)
-  VALUES ('UPDATE', 'vehicles', NEW.vehicle_id, NOW(), 'system', 0);
+  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id, before_data, after_data)
+  VALUES ('UPDATE', 'vehicles', NEW.vehicle_id, NOW(), 'system', 0,
+    JSON_OBJECT('registration', OLD.registration, 'vehicle_type_id', OLD.vehicle_type_id,
+                'capacity', OLD.capacity, 'is_available', OLD.is_available),
+    JSON_OBJECT('registration', NEW.registration, 'vehicle_type_id', NEW.vehicle_type_id,
+                'capacity', NEW.capacity, 'is_available', NEW.is_available)
+  );
 END;
 //
 
@@ -1017,8 +1123,12 @@ CREATE TRIGGER trg_audit_vehicles_delete
 AFTER DELETE ON vehicles
 FOR EACH ROW
 BEGIN
-  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id)
-  VALUES ('DELETE', 'vehicles', OLD.vehicle_id, NOW(), 'system', 0);
+  INSERT INTO audit_records (action, table_name, record_id, changed_at, user_type, user_id, before_data, after_data)
+  VALUES ('DELETE', 'vehicles', OLD.vehicle_id, NOW(), 'system', 0,
+    JSON_OBJECT('registration', OLD.registration, 'vehicle_type_id', OLD.vehicle_type_id,
+                'capacity', OLD.capacity, 'is_available', OLD.is_available),
+    NULL
+  );
 END;
 //
 
